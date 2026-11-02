@@ -25,6 +25,8 @@ from .canvas_button import CanvasButton
 from .canvas_path import CanvasPath
 from .canvas_polygon import CanvasPolygon
 
+# Force ipv4
+requests.packages.urllib3.util.connection.HAS_IPV6 = False
 
 class TkinterMapView(tkinter.Frame):
     def __init__(self, *args,

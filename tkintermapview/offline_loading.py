@@ -9,6 +9,9 @@ from PIL import Image, UnidentifiedImageError
 
 from .utility_functions import decimal_to_osm, osm_to_decimal
 
+# force ipv4
+requests.packages.urllib3.util.connection.HAS_IPV6 = False
+
 
 class OfflineLoader:
     def __init__(self, path=None, tile_server=None, max_zoom=19):
