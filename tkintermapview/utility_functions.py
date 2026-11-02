@@ -23,6 +23,41 @@ def osm_to_decimal(tile_x: Union[int, float], tile_y: Union[int, float], zoom: i
     return lat_deg, lon_deg
 
 
+def normalize_longitude(lon_deg: float) -> float:
+    """ wraps any longitude into the range [-180, 180) """
+    return ((lon_deg + 180.0) % 360.0) - 180.0
+
+
+def wrap_tile_x(tile_x: int, zoom: int) -> int:
+    """ maps an unbounded tile x index onto a real tile index 0 .. 2**zoom - 1 """
+    return int(tile_x) % (2 ** zoom)
+
+
+def nearest_world_copy_x(tile_x: float, reference_x: float, zoom: int) -> float:
+    """ shifts tile_x by whole world widths so it lies as close as possible to reference_x """
+    n = 2 ** zoom
+    return tile_x + round((reference_x - tile_x) / n) * n
+
+
+def unwrapped_tile_positions(position_list: list, reference_x, zoom: int) -> list:
+    """ converts a list of (lat, lon) to tile positions where consecutive points never jump by more
+        than half a world (so lines take the short way across the 180 meridian), then shifts the whole
+        list by whole world widths so its first point is the copy closest to reference_x """
+    n = 2 ** zoom
+    result = []
+    prev_x = None
+    for position in position_list:
+        x, y = decimal_to_osm(*position, zoom)
+        if prev_x is not None:
+            x = nearest_world_copy_x(x, prev_x, zoom)
+        result.append((x, y))
+        prev_x = x
+    if result and reference_x is not None:
+        offset = round((reference_x - result[0][0]) / n) * n
+        result = [(x + offset, y) for x, y in result]
+    return result
+
+
 def convert_coordinates_to_address(deg_x: float, deg_y: float) -> geocoder.osm_reverse.OsmReverse:
     """ returns address object with the following attributes:
         street, housenumber, postal, city, state, country, latlng

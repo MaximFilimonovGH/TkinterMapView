@@ -20,7 +20,7 @@ from functools import partial
 
 from .canvas_position_marker import CanvasPositionMarker
 from .canvas_tile import CanvasTile
-from .utility_functions import decimal_to_osm, osm_to_decimal
+from .utility_functions import decimal_to_osm, osm_to_decimal, normalize_longitude, wrap_tile_x
 from .canvas_button import CanvasButton
 from .canvas_path import CanvasPath
 from .canvas_polygon import CanvasPolygon
@@ -226,8 +226,8 @@ class TkinterMapView(tkinter.Frame):
         tile_mouse_x = self.upper_left_tile_pos[0] + (self.lower_right_tile_pos[0] - self.upper_left_tile_pos[0]) * relative_mouse_x
         tile_mouse_y = self.upper_left_tile_pos[1] + (self.lower_right_tile_pos[1] - self.upper_left_tile_pos[1]) * relative_mouse_y
 
-        coordinate_mouse_pos = osm_to_decimal(tile_mouse_x, tile_mouse_y, round(self.zoom))
-        return coordinate_mouse_pos
+        lat, lon = osm_to_decimal(tile_mouse_x, tile_mouse_y, round(self.zoom))
+        return lat, normalize_longitude(lon)
 
     def mouse_right_click(self, event):
         coordinate_mouse_pos = self.convert_canvas_coords_to_decimal_coords(event.x, event.y)
@@ -275,9 +275,14 @@ class TkinterMapView(tkinter.Frame):
     def get_position(self) -> tuple:
         """ returns current middle position of map widget in decimal coordinates """
 
-        return osm_to_decimal((self.lower_right_tile_pos[0] + self.upper_left_tile_pos[0]) / 2,
-                              (self.lower_right_tile_pos[1] + self.upper_left_tile_pos[1]) / 2,
-                              round(self.zoom))
+        lat, lon = osm_to_decimal((self.lower_right_tile_pos[0] + self.upper_left_tile_pos[0]) / 2,
+                                  (self.lower_right_tile_pos[1] + self.upper_left_tile_pos[1]) / 2,
+                                  round(self.zoom))
+        return lat, normalize_longitude(lon)
+
+    def get_view_center_tile_x(self) -> float:
+        """ unbounded tile x of the view centre, used to pick which world copy overlays are drawn in """
+        return (self.lower_right_tile_pos[0] + self.upper_left_tile_pos[0]) / 2
 
     def fit_bounding_box(self, position_top_left: Tuple[float, float], position_bottom_right: Tuple[float, float]):
         # wait 200ms till method is called, because dimensions have to update first
@@ -465,16 +470,16 @@ class TkinterMapView(tkinter.Frame):
 
                 # pre cache top and bottom row
                 for x in range(self.pre_cache_position[0] - radius, self.pre_cache_position[0] + radius + 1):
-                    if f"{zoom}{x}{self.pre_cache_position[1] + radius}" not in self.tile_image_cache:
+                    if self.get_tile_image_from_cache(zoom, x, self.pre_cache_position[1] + radius) is False:
                         self.request_image(zoom, x, self.pre_cache_position[1] + radius, db_cursor=db_cursor)
-                    if f"{zoom}{x}{self.pre_cache_position[1] - radius}" not in self.tile_image_cache:
+                    if self.get_tile_image_from_cache(zoom, x, self.pre_cache_position[1] - radius) is False:
                         self.request_image(zoom, x, self.pre_cache_position[1] - radius, db_cursor=db_cursor)
 
                 # pre cache left and right column
                 for y in range(self.pre_cache_position[1] - radius, self.pre_cache_position[1] + radius + 1):
-                    if f"{zoom}{self.pre_cache_position[0] + radius}{y}" not in self.tile_image_cache:
+                    if self.get_tile_image_from_cache(zoom, self.pre_cache_position[0] + radius, y) is False:
                         self.request_image(zoom, self.pre_cache_position[0] + radius, y, db_cursor=db_cursor)
-                    if f"{zoom}{self.pre_cache_position[0] - radius}{y}" not in self.tile_image_cache:
+                    if self.get_tile_image_from_cache(zoom, self.pre_cache_position[0] - radius, y) is False:
                         self.request_image(zoom, self.pre_cache_position[0] - radius, y, db_cursor=db_cursor)
 
                 # raise the radius
@@ -496,6 +501,11 @@ class TkinterMapView(tkinter.Frame):
                     del self.tile_image_cache[key]
 
     def request_image(self, zoom: int, x: int, y: int, db_cursor=None) -> ImageTk.PhotoImage:
+        # wrap x so that tiles east of 180 / west of -180 load the real tile from the other side
+        x = wrap_tile_x(x, zoom)
+        # rows above the north pole / below the south pole do not exist
+        if not 0 <= y < 2 ** zoom:
+            return self.empty_tile_image
 
         # if database is available check first if tile is in database, if not try to use server
         if db_cursor is not None:
@@ -558,6 +568,7 @@ class TkinterMapView(tkinter.Frame):
             return self.empty_tile_image
 
     def get_tile_image_from_cache(self, zoom: int, x: int, y: int):
+        x = wrap_tile_x(x, zoom)
         if f"{zoom}{x}{y}" not in self.tile_image_cache:
             return False
         else:
@@ -939,14 +950,11 @@ class TkinterMapView(tkinter.Frame):
         self.set_zoom(new_zoom, relative_pointer_x=relative_mouse_x, relative_pointer_y=relative_mouse_y)
 
     def check_map_border_crossing(self):
+        # only clamp vertically (poles); horizontally the map wraps around the 180 meridian
         diff_x, diff_y = 0, 0
-        if self.upper_left_tile_pos[0] < 0:
-            diff_x += 0 - self.upper_left_tile_pos[0]
 
         if self.upper_left_tile_pos[1] < 0:
             diff_y += 0 - self.upper_left_tile_pos[1]
-        if self.lower_right_tile_pos[0] > 2 ** round(self.zoom):
-            diff_x -= self.lower_right_tile_pos[0] - (2 ** round(self.zoom))
         if self.lower_right_tile_pos[1] > 2 ** round(self.zoom):
             diff_y -= self.lower_right_tile_pos[1] - (2 ** round(self.zoom))
 

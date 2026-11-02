@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .map_widget import TkinterMapView
 
-from .utility_functions import decimal_to_osm, osm_to_decimal
+from .utility_functions import decimal_to_osm, osm_to_decimal, unwrapped_tile_positions
 
 
 class CanvasPath:
@@ -32,6 +32,9 @@ class CanvasPath:
 
         self.last_upper_left_tile_pos = None
         self.last_position_list_length = len(self.position_list)
+        self.last_world_offset = None
+        self.tile_position_cache = None  # unwrapped tile positions, recomputed only when zoom or points change
+        self.tile_position_cache_key = None
 
     def delete(self):
         if self in self.map_widget.canvas_path_list:
@@ -56,8 +59,8 @@ class CanvasPath:
         self.position_list.remove((deg_x, deg_y))
         self.draw()
 
-    def get_canvas_pos(self, position, widget_tile_width, widget_tile_height):
-        tile_position = decimal_to_osm(*position, round(self.map_widget.zoom))
+    def get_canvas_pos(self, tile_position, widget_tile_width, widget_tile_height):
+        # tile_position is an already unwrapped OSM tile position, see draw()
 
         canvas_pos_x = ((tile_position[0] - self.map_widget.upper_left_tile_pos[0]) / widget_tile_width) * self.map_widget.width
         canvas_pos_y = ((tile_position[1] - self.map_widget.upper_left_tile_pos[1]) / widget_tile_height) * self.map_widget.height
@@ -86,7 +89,22 @@ class CanvasPath:
         widget_tile_width = self.map_widget.lower_right_tile_pos[0] - self.map_widget.upper_left_tile_pos[0]
         widget_tile_height = self.map_widget.lower_right_tile_pos[1] - self.map_widget.upper_left_tile_pos[1]
 
-        if move is True and self.last_upper_left_tile_pos is not None and new_line_length is False:
+        # pick the world copy to draw in; if it changed, recompute all canvas positions
+        zoom = round(self.map_widget.zoom)
+        cache_key = (zoom, id(self.position_list), len(self.position_list))
+        if cache_key != self.tile_position_cache_key:
+            # expensive trig conversion: only when zoom or the point list changes, not on every mouse move
+            self.tile_position_cache = unwrapped_tile_positions(self.position_list, None, zoom)
+            self.tile_position_cache_key = cache_key
+        n = 2 ** zoom
+        if self.tile_position_cache:
+            world_offset = round((self.map_widget.get_view_center_tile_x() - self.tile_position_cache[0][0]) / n) * n
+        else:
+            world_offset = 0
+        world_changed = world_offset != self.last_world_offset
+        self.last_world_offset = world_offset
+
+        if move is True and self.last_upper_left_tile_pos is not None and new_line_length is False and not world_changed:
             x_move = ((self.last_upper_left_tile_pos[0] - self.map_widget.upper_left_tile_pos[0]) / widget_tile_width) * self.map_widget.width
             y_move = ((self.last_upper_left_tile_pos[1] - self.map_widget.upper_left_tile_pos[1]) / widget_tile_height) * self.map_widget.height
 
@@ -95,8 +113,8 @@ class CanvasPath:
                 self.canvas_line_positions[i + 1] += y_move
         else:
             self.canvas_line_positions = []
-            for position in self.position_list:
-                canvas_position = self.get_canvas_pos(position, widget_tile_width, widget_tile_height)
+            for tile_x, tile_y in self.tile_position_cache:
+                canvas_position = self.get_canvas_pos((tile_x + world_offset, tile_y), widget_tile_width, widget_tile_height)
                 self.canvas_line_positions.append(canvas_position[0])
                 self.canvas_line_positions.append(canvas_position[1])
 
@@ -120,4 +138,3 @@ class CanvasPath:
 
         self.map_widget.manage_z_order()
         self.last_upper_left_tile_pos = self.map_widget.upper_left_tile_pos
-

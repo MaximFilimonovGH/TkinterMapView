@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Callable
 if TYPE_CHECKING:
     from .map_widget import TkinterMapView
 
-from .utility_functions import decimal_to_osm, osm_to_decimal
+from .utility_functions import decimal_to_osm, osm_to_decimal, nearest_world_copy_x
 
 
 class CanvasPositionMarker:
@@ -119,7 +119,11 @@ class CanvasPositionMarker:
             self.command(self)
 
     def get_canvas_pos(self, position):
-        tile_position = decimal_to_osm(*position, round(self.map_widget.zoom))
+        zoom = round(self.map_widget.zoom)
+        tile_position = decimal_to_osm(*position, zoom)
+        # draw the marker in the world copy that is closest to the current view
+        tile_position = (nearest_world_copy_x(tile_position[0], self.map_widget.get_view_center_tile_x(), zoom),
+                         tile_position[1])
 
         widget_tile_width = self.map_widget.lower_right_tile_pos[0] - self.map_widget.upper_left_tile_pos[0]
         widget_tile_height = self.map_widget.lower_right_tile_pos[1] - self.map_widget.upper_left_tile_pos[1]
