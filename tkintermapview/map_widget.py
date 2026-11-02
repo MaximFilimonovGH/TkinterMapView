@@ -25,6 +25,11 @@ from .canvas_button import CanvasButton
 from .canvas_path import CanvasPath
 from .canvas_polygon import CanvasPolygon
 
+from urllib3.exceptions import InsecureRequestWarning
+import requests.adapters
+
+# Suppress only the single warning from urllib3 needed.
+requests.packages.urllib3.disable_warnings(category=InsecureRequestWarning)
 # Force ipv4
 requests.packages.urllib3.util.connection.HAS_IPV6 = False
 
@@ -39,6 +44,12 @@ class TkinterMapView(tkinter.Frame):
                  max_zoom: int = 19,
                  **kwargs):
         super().__init__(*args, **kwargs)
+
+        adapter = requests.adapters.HTTPAdapter(pool_connections=50, pool_maxsize=50)
+        self.session = requests.Session()
+        self.session.mount('https://', adapter)
+        self.session.trust_env = False
+        self.session.verify = False
 
         self.running = True
 
@@ -168,6 +179,7 @@ class TkinterMapView(tkinter.Frame):
 
     def destroy(self):
         self.running = False
+        self.session.close()
         super().destroy()
 
     def draw_rounded_corners(self):
@@ -514,11 +526,11 @@ class TkinterMapView(tkinter.Frame):
         # try to get the tile from the server
         try:
             url = self.tile_server.replace("{x}", str(x)).replace("{y}", str(y)).replace("{z}", str(zoom))
-            image = Image.open(requests.get(url, stream=True, headers={"User-Agent": "TkinterMapView"}).raw)
+            image = Image.open(self.session.get(url, stream=True, headers={"User-Agent": "TkinterMapView"}).raw)
 
             if self.overlay_tile_server is not None:
                 url = self.overlay_tile_server.replace("{x}", str(x)).replace("{y}", str(y)).replace("{z}", str(zoom))
-                image_overlay = Image.open(requests.get(url, stream=True, headers={"User-Agent": "TkinterMapView"}).raw)
+                image_overlay = Image.open(self.session.get(url, stream=True, headers={"User-Agent": "TkinterMapView"}).raw)
                 image = image.convert("RGBA")
                 image_overlay = image_overlay.convert("RGBA")
 
